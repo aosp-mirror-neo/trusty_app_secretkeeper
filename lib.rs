@@ -15,17 +15,20 @@
  */
 
 use alloc::{rc::Rc, vec::Vec};
+use authgraph_boringssl as boring;
 use authgraph_core::{
     keyexchange::{AuthGraphParticipant, MAX_OPENED_SESSIONS},
-    ta,
+    ta::{AuthGraphTa, Role},
 };
 use core::cell::RefCell;
+use dice_policy as _; // TODO: remove once dice_policy legitimately included in build
 use log::{debug, error, info};
+use secretkeeper_comn::ta::SecretkeeperTa;
 use tipc::{
     service_dispatcher, ConnectResult, Deserialize, Handle, Manager, MessageResult, PortCfg,
     Serialize, Serializer, TipcError, Uuid,
 };
-use trusty_std::alloc::{FallibleVec, TryAllocFrom};
+use trusty_std::alloc::TryAllocFrom;
 
 /// Port for Secretkeeper communication with userspace.
 const SK_PORT_NAME: &str = "com.android.trusty.secretkeeper";
@@ -78,7 +81,7 @@ impl<'s> Serialize<'s> for SkMessage {
 
 /// Implementation of the TIPC service for AuthGraph.
 struct AuthGraphService {
-    ag_ta: Rc<RefCell<ta::AuthGraphTa>>,
+    ta: Rc<RefCell<AuthGraphTa>>,
 }
 
 impl tipc::Service for AuthGraphService {
@@ -104,7 +107,7 @@ impl tipc::Service for AuthGraphService {
         debug!("Received an AuthGraph message");
 
         // TODO: handle messages that need splitting
-        let rsp = self.ag_ta.borrow_mut().process(&msg.0);
+        let rsp = self.ta.borrow_mut().process(&msg.0);
         handle.send(&SkMessage(rsp))?;
         Ok(MessageResult::MaintainConnection)
     }
@@ -112,7 +115,7 @@ impl tipc::Service for AuthGraphService {
 
 /// Implementation of the TIPC service for Secretkeeper.
 struct SecretkeeperService {
-    _ag_ta: Rc<RefCell<ta::AuthGraphTa>>,
+    ta: Rc<RefCell<SecretkeeperTa>>,
 }
 
 impl tipc::Service for SecretkeeperService {
@@ -133,12 +136,13 @@ impl tipc::Service for SecretkeeperService {
         &self,
         _connection: &Self::Connection,
         handle: &Handle,
-        _msg: Self::Message,
+        msg: Self::Message,
     ) -> tipc::Result<MessageResult> {
         debug!("Received a SecretKeeper message");
 
-        // TODO: plumb in Secretkeeper
-        handle.send(&SkMessage(Vec::new()))?;
+        // TODO: handle messages that need splitting
+        let rsp = self.ta.borrow_mut().process(&msg.0);
+        handle.send(&SkMessage(rsp))?;
         Ok(MessageResult::MaintainConnection)
     }
 }
@@ -216,22 +220,18 @@ pub fn inner_main() -> Result<(), TipcError> {
     trusty_log::init_with_config(config);
     info!("Secretkeeper TA startup, on: '{AG_PORT_NAME}', '{SK_PORT_NAME}', '{BL_PORT_NAME}'");
 
-    // TODO: replace with real device
-    let ag_device_imp = authgraph_boringssl::test_device::AgDevice::default();
-    let ag_participant = AuthGraphParticipant::new(
-        authgraph_boringssl::crypto_trait_impls(),
-        Box::new(ag_device_imp),
-        MAX_OPENED_SESSIONS,
-    )
-    .map_err(|e| {
-        error!("Failed to build AG traits: {e:?}");
-        TipcError::UnknownError
-    })?;
-    let ag_ta = ta::AuthGraphTa::new(ag_participant, ta::Role::Both); // TODO: change to Role::Sink
-    let ag_ta = Rc::new(RefCell::new(ag_ta));
-    let ag_service = AuthGraphService { ag_ta: ag_ta.clone() };
-    // TODO: replace with Secretkeeper TA code
-    let sk_service = SecretkeeperService { _ag_ta: ag_ta };
+    let mut crypto_impls = boring::crypto_trait_impls();
+    let sk_ta = Rc::new(RefCell::new(
+        SecretkeeperTa::new(&mut crypto_impls).expect("Failed to create local Secretkeeper TA"),
+    ));
+    let ag_ta = Rc::new(RefCell::new(AuthGraphTa::new(
+        AuthGraphParticipant::new(crypto_impls, sk_ta.clone(), MAX_OPENED_SESSIONS)
+            .expect("Failed to create local AuthGraph TA"),
+        Role::Sink,
+    )));
+
+    let ag_service = AuthGraphService { ta: ag_ta };
+    let sk_service = SecretkeeperService { ta: sk_ta };
     // TODO: figure out bootloader interactions
     let bl_service = BootloaderService;
 
