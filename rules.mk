@@ -36,6 +36,6 @@ MODULE_LIBRARY_DEPS += \
 	trusty/user/base/lib/trusty-log \
 	trusty/user/base/lib/trusty-std \
 
-MODULE_RUST_TESTS := false
+MODULE_RUST_TESTS := true
 
 include make/library.mk
