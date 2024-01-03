@@ -14,37 +14,117 @@
  * limitations under the License.
  */
 
-//! Implementation of the `KeyValueStore` trait.
+//! Implementation of the `KeyValueStore` trait using Trusty secure storage.
+//!
+//! Store each secret in a file of its own (mapping the secret ID to the filename) as there are not
+//! expected to be many extant secrets.  However, use a prefix for the filename to allow easier
+//! migration to a different scheme in future if this assumption changes.
 
-use alloc::collections::BTreeMap;
+use alloc::string::String;
 use secretkeeper_comm::data_types::error::Error;
 use secretkeeper_core::store::KeyValueStore;
+use storage::{OpenMode, Port, Session};
+use trusty_sys;
 
-// TODO: replace with persistent secure storage
-/// An in-memory implementation of KeyValueStore.
+/// Store each secret in a file named "v1_<hex>", using the hex representation of the key/secret ID.
+/// Note that IDs are not confidential, so can appear in logs.
+const PREFIX_V1: &str = "v1_";
+
+/// Generate the filename corresponding to a key.
+fn filename(key: &[u8]) -> String {
+    let mut result = String::with_capacity(PREFIX_V1.len() + 2 * key.len());
+    result += PREFIX_V1;
+    for byte in key {
+        result += &format!("{:02x}", byte);
+    }
+    result
+}
+
+/// Helper macro for emitting an error.
+macro_rules! ss_err {
+    {  $e:expr, $($arg:tt)+ } => {
+        {
+            log::error!("{}: {:?}", format_args!($($arg)+), $e);
+            Error::UnexpectedError
+        }
+    };
+}
+
+/// Create a storage session.
+fn create_session() -> Result<Session, Error> {
+    Session::new(Port::TamperProof, /* wait_for_port= */ true)
+        .map_err(|e| ss_err!(e, "Couldn't create storage session"))
+}
+
+/// An implementation of `KeyValueStore` backed by secure storage.
 #[derive(Default)]
-pub struct InMemoryStore(BTreeMap<Vec<u8>, Vec<u8>>);
+pub struct SecureStore;
 
-impl KeyValueStore for InMemoryStore {
+impl KeyValueStore for SecureStore {
     fn store(&mut self, key: &[u8], val: &[u8]) -> Result<(), Error> {
+        let filename = filename(key);
+        let mut session = create_session()?;
+
         // This will overwrite the value if key is already present.
-        let _ = self.0.insert(key.to_vec(), val.to_vec());
+        let mut file = session
+            .open_file(&filename, OpenMode::Create)
+            .map_err(|e| ss_err!(e, "Couldn't create file '{filename}'"))?;
+        session.write_all(&mut file, val).map_err(|e| ss_err!(e, "Failed to write data"))?;
         Ok(())
     }
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        let optional_val = self.0.get(key);
-        Ok(optional_val.cloned())
+        let filename = filename(key);
+        let mut session = create_session()?;
+        let file = match session.open_file(&filename, OpenMode::Open) {
+            Ok(f) => f,
+            Err(storage::Error::Code(trusty_sys::Error::NotFound)) => return Ok(None),
+            Err(e) => return Err(ss_err!(e, "Failed to open file '{filename}'")),
+        };
+        let size = session
+            .get_size(&file)
+            .map_err(|e| ss_err!(e, "Failed to get size for '{filename}'"))?;
+        let mut buffer = vec![0; size];
+        let content = session
+            .read_all(&file, buffer.as_mut_slice())
+            .map_err(|e| ss_err!(e, "Failed to read '{filename}'"))?;
+        let total_size = content.len();
+        buffer.resize(total_size, 0);
+        Ok(Some(buffer))
     }
 
     fn delete(&mut self, key: &[u8]) -> Result<(), Error> {
-        self.0.remove(key);
-        Ok(())
+        let filename = filename(key);
+        let mut session = create_session()?;
+        match session.remove(&filename) {
+            Ok(_) => Ok(()),
+            Err(storage::Error::Code(trusty_sys::Error::NotFound)) => Ok(()),
+            Err(e) => Err(ss_err!(e, "Failed to delete file '{filename}'")),
+        }
     }
 
     fn delete_all(&mut self) -> Result<(), Error> {
-        self.0.clear();
-        Ok(())
+        let mut failed = false;
+        let mut session = create_session()?;
+        for entry in session.list_files().map_err(|e| ss_err!(e, "Failed to list files"))? {
+            match entry {
+                Ok((filename, _state)) if filename.starts_with(PREFIX_V1) => {
+                    let result = session
+                        .remove(&filename)
+                        .map_err(|e| ss_err!(e, "Failed to delete '{filename}'"));
+                    if result.is_err() {
+                        failed = true;
+                    }
+                }
+                Ok((filename, _state)) => log::info!("Skipping unrelated file {filename}"),
+                Err(e) => log::error!("Failed to delete an entry: {e:?}"),
+            };
+        }
+        if failed {
+            Err(Error::UnexpectedError)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -60,7 +140,7 @@ mod tests {
 
     #[test]
     fn test_secretkeeper_store() {
-        let mut store = InMemoryStore::default();
+        let mut store = SecureStore::default();
 
         // Ensure consistent state before.
         store.delete(KEY1).unwrap();

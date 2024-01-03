@@ -225,7 +225,7 @@ pub fn inner_main() -> Result<(), TipcError> {
     info!("Secretkeeper TA startup, on: '{AG_PORT_NAME}', '{SK_PORT_NAME}', '{BL_PORT_NAME}'");
 
     let mut crypto_impls = boring::crypto_trait_impls();
-    let storage_impl = Box::new(store::InMemoryStore::default()); // TODO: replace with real storage
+    let storage_impl = Box::new(store::SecureStore::default());
     let sk_ta = Rc::new(RefCell::new(
         SecretkeeperTa::new(&mut crypto_impls, storage_impl)
             .expect("Failed to create local Secretkeeper TA"),
