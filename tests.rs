@@ -16,6 +16,9 @@
 //! Unit tests.
 
 use super::*;
+use alloc::vec;
+use coset::CborSerializable;
+use secretkeeper_core::ta::bootloader as bl;
 use test::expect;
 use tipc::Handle;
 use trusty_std::ffi::{CString, FallibleCString};
@@ -40,6 +43,25 @@ fn port_connect(port_name: &str, secure: SecureConnections) {
 fn secretkeeper_connection_test() {
     port_connect(AG_PORT_NAME, SecureConnections(false));
     port_connect(SK_PORT_NAME, SecureConnections(false));
-    // TODO: determine if BL->SK connection counts as secure.
     port_connect(BL_PORT_NAME, SecureConnections(true));
+}
+
+#[test]
+fn bootloader_retrieve_key() {
+    let port = CString::try_new(BL_PORT_NAME).unwrap();
+    let session = Handle::connect(port.as_c_str()).unwrap();
+
+    // Manually build a `GetIdentityKey` request.
+    let req = SkMessage(vec![0x00, 0x00, 0x00, 0x01]);
+
+    session.send(&req).unwrap();
+    let mut buf = [0; MAX_MSG_SIZE];
+    let rsp: SkMessage = session.recv(&mut buf).unwrap();
+
+    let rsp = bl::Response::from_slice(&rsp.0).unwrap();
+    expect!(matches!(rsp, bl::Response::IdentityKey(_)));
+    if let bl::Response::IdentityKey(key) = rsp {
+        // Check the key parses as a COSE_Key.
+        expect!(coset::CoseKey::from_slice(&key).is_ok());
+    }
 }
