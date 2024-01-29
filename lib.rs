@@ -20,8 +20,8 @@ use authgraph_core::{
     keyexchange::{AuthGraphParticipant, MAX_OPENED_SESSIONS},
     ta::{AuthGraphTa, Role},
 };
+use authgraph_wire::fragmentation::{Fragmenter, Reassembler, PLACEHOLDER_MORE_TO_COME};
 use core::cell::RefCell;
-use dice_policy as _; // TODO: remove once dice_policy legitimately included in build
 use log::{debug, error, info};
 use secretkeeper_core::ta::SecretkeeperTa;
 use tipc::{
@@ -83,9 +83,38 @@ impl<'s> Serialize<'s> for SkMessage {
     }
 }
 
+/// Break a response into fragments and send back to HAL service.
+fn fragmented_send(handle: &Handle, full_rsp: Vec<u8>) -> tipc::Result<()> {
+    for rsp_frag in Fragmenter::new(&full_rsp, MAX_MSG_SIZE) {
+        handle.send(&SkMessage(rsp_frag))?;
+    }
+    Ok(())
+}
+
+/// Process an incoming request that may arrive in fragments.
+fn fragmented_process<T>(
+    handle: &Handle,
+    msg: &[u8],
+    pending: &mut Reassembler,
+    process: T,
+) -> tipc::Result<MessageResult>
+where
+    T: Fn(&[u8]) -> Vec<u8>,
+{
+    // Accumulate request fragments until able to feed complete request to `process`.
+    if let Some(full_req) = pending.accumulate(msg) {
+        let full_rsp = process(&full_req);
+        fragmented_send(handle, full_rsp)?;
+    } else {
+        handle.send(&SkMessage(PLACEHOLDER_MORE_TO_COME.to_vec()))?;
+    }
+    Ok(MessageResult::MaintainConnection)
+}
+
 /// Implementation of the TIPC service for AuthGraph.
 struct AuthGraphService {
     ta: Rc<RefCell<AuthGraphTa>>,
+    pending_req: RefCell<Reassembler>,
 }
 
 impl tipc::Service for AuthGraphService {
@@ -110,16 +139,16 @@ impl tipc::Service for AuthGraphService {
     ) -> tipc::Result<MessageResult> {
         debug!("Received an AuthGraph message");
 
-        // TODO: handle messages that need splitting
-        let rsp = self.ta.borrow_mut().process(&msg.0);
-        handle.send(&SkMessage(rsp))?;
-        Ok(MessageResult::MaintainConnection)
+        fragmented_process(handle, &msg.0, &mut self.pending_req.borrow_mut(), |req| {
+            self.ta.borrow_mut().process(req)
+        })
     }
 }
 
 /// Implementation of the TIPC service for Secretkeeper.
 struct SecretkeeperService {
     ta: Rc<RefCell<SecretkeeperTa>>,
+    pending_req: RefCell<Reassembler>,
 }
 
 impl tipc::Service for SecretkeeperService {
@@ -144,10 +173,9 @@ impl tipc::Service for SecretkeeperService {
     ) -> tipc::Result<MessageResult> {
         debug!("Received a SecretKeeper message");
 
-        // TODO: handle messages that need splitting
-        let rsp = self.ta.borrow_mut().process(&msg.0);
-        handle.send(&SkMessage(rsp))?;
-        Ok(MessageResult::MaintainConnection)
+        fragmented_process(handle, &msg.0, &mut self.pending_req.borrow_mut(), |req| {
+            self.ta.borrow_mut().process(req)
+        })
     }
 }
 
@@ -241,8 +269,8 @@ pub fn inner_main() -> Result<(), TipcError> {
         Role::Sink,
     )));
 
-    let ag_service = AuthGraphService { ta: ag_ta };
-    let sk_service = SecretkeeperService { ta: sk_ta.clone() };
+    let ag_service = AuthGraphService { ta: ag_ta, pending_req: Default::default() };
+    let sk_service = SecretkeeperService { ta: sk_ta.clone(), pending_req: Default::default() };
     let bl_service = BootloaderService { ta: sk_ta };
 
     // Handle multiple TIPC services, one service per port.
