@@ -25,6 +25,8 @@ MODULE_SRCS += \
 MODULE_CRATE_NAME := secretkeeper
 
 MODULE_LIBRARY_DEPS += \
+	trusty/user/base/lib/authgraph-rust/boringssl \
+	trusty/user/base/lib/authgraph-rust/core \
 	$(call FIND_CRATE,log) \
 	trusty/user/base/lib/storage/rust \
 	trusty/user/base/lib/tipc/rust \
