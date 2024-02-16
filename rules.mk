@@ -27,6 +27,7 @@ MODULE_CRATE_NAME := secretkeeper
 MODULE_LIBRARY_DEPS += \
 	trusty/user/base/lib/authgraph-rust/boringssl \
 	trusty/user/base/lib/authgraph-rust/core \
+	trusty/user/base/lib/authgraph-rust/wire \
 	trusty/user/base/lib/secretkeeper/comm \
 	trusty/user/base/lib/secretkeeper/core \
 	trusty/user/base/lib/secretkeeper/dice_policy \
