@@ -227,7 +227,7 @@ pub fn inner_main() -> Result<(), TipcError> {
     let mut crypto_impls = boring::crypto_trait_impls();
     let storage_impl = Box::new(store::SecureStore::default());
     let sk_ta = Rc::new(RefCell::new(
-        SecretkeeperTa::new(&mut crypto_impls, storage_impl)
+        SecretkeeperTa::new(&mut crypto_impls, storage_impl, coset::iana::EllipticCurve::Ed25519)
             .expect("Failed to create local Secretkeeper TA"),
     ));
     let ag_ta = Rc::new(RefCell::new(AuthGraphTa::new(
