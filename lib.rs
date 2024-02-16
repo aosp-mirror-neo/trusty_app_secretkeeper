@@ -31,6 +31,8 @@ use tipc::{
 use trusty_std::alloc::TryAllocFrom;
 
 mod store;
+#[cfg(test)]
+mod tests;
 
 /// Port for Secretkeeper communication with userspace.
 const SK_PORT_NAME: &str = "com.android.trusty.secretkeeper";
@@ -246,6 +248,7 @@ pub fn inner_main() -> Result<(), TipcError> {
     })?;
 
     // Add the TIPC services into the dispatcher.
+    // TODO: determine if BL->SK connection counts as secure. If not, drop SecureConnections.
     add_service_port(&mut dispatcher, ag_service, AG_PORT_NAME, SecureConnections(false))?;
     add_service_port(&mut dispatcher, sk_service, SK_PORT_NAME, SecureConnections(false))?;
     add_service_port(&mut dispatcher, bl_service, BL_PORT_NAME, SecureConnections(true))?;

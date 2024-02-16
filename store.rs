@@ -47,3 +47,46 @@ impl KeyValueStore for InMemoryStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test::expect_eq;
+
+    const KEY1: &[u8] = b"bogus key 1";
+    const KEY2: &[u8] = b"bogus key 2";
+    const SECRET1: &[u8] = b"bogus secret 1";
+    const SECRET2: &[u8] = b"bogus secret 2";
+
+    #[test]
+    fn test_secretkeeper_store() {
+        let mut store = InMemoryStore::default();
+
+        // Ensure consistent state before.
+        store.delete(KEY1).unwrap();
+        store.delete(KEY2).unwrap();
+
+        store.store(KEY1, SECRET1).unwrap();
+        expect_eq!(store.get(KEY1), Ok(Some(SECRET1.to_vec())));
+        expect_eq!(store.get(KEY2), Ok(None));
+        store.store(KEY1, SECRET2).unwrap();
+        expect_eq!(store.get(KEY1), Ok(Some(SECRET2.to_vec())));
+        expect_eq!(store.get(KEY2), Ok(None));
+        store.store(KEY1, SECRET1).unwrap();
+        expect_eq!(store.get(KEY1), Ok(Some(SECRET1.to_vec())));
+        expect_eq!(store.get(KEY2), Ok(None));
+        store.store(KEY2, SECRET1).unwrap();
+        expect_eq!(store.get(KEY1), Ok(Some(SECRET1.to_vec())));
+        expect_eq!(store.get(KEY2), Ok(Some(SECRET1.to_vec())));
+        store.delete(KEY1).unwrap();
+        expect_eq!(store.get(KEY1), Ok(None));
+        expect_eq!(store.get(KEY2), Ok(Some(SECRET1.to_vec())));
+        store.delete(KEY2).unwrap();
+        expect_eq!(store.get(KEY1), Ok(None));
+        expect_eq!(store.get(KEY2), Ok(None));
+
+        // Ensure consistent state after.
+        store.delete(KEY1).unwrap();
+        store.delete(KEY2).unwrap();
+    }
+}
