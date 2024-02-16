@@ -23,12 +23,14 @@ use authgraph_core::{
 use core::cell::RefCell;
 use dice_policy as _; // TODO: remove once dice_policy legitimately included in build
 use log::{debug, error, info};
-use secretkeeper_comn::ta::SecretkeeperTa;
+use secretkeeper_core::ta::SecretkeeperTa;
 use tipc::{
     service_dispatcher, ConnectResult, Deserialize, Handle, Manager, MessageResult, PortCfg,
     Serialize, Serializer, TipcError, Uuid,
 };
 use trusty_std::alloc::TryAllocFrom;
+
+mod store;
 
 /// Port for Secretkeeper communication with userspace.
 const SK_PORT_NAME: &str = "com.android.trusty.secretkeeper";
@@ -221,8 +223,10 @@ pub fn inner_main() -> Result<(), TipcError> {
     info!("Secretkeeper TA startup, on: '{AG_PORT_NAME}', '{SK_PORT_NAME}', '{BL_PORT_NAME}'");
 
     let mut crypto_impls = boring::crypto_trait_impls();
+    let storage_impl = Box::new(store::InMemoryStore::default()); // TODO: replace with real storage
     let sk_ta = Rc::new(RefCell::new(
-        SecretkeeperTa::new(&mut crypto_impls).expect("Failed to create local Secretkeeper TA"),
+        SecretkeeperTa::new(&mut crypto_impls, storage_impl)
+            .expect("Failed to create local Secretkeeper TA"),
     ));
     let ag_ta = Rc::new(RefCell::new(AuthGraphTa::new(
         AuthGraphParticipant::new(crypto_impls, sk_ta.clone(), MAX_OPENED_SESSIONS)
