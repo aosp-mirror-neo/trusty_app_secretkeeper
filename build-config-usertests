@@ -15,5 +15,5 @@
 # This file lists userspace tests
 
 [
-    porttest("com.android.trusty.rust.secretkeeper.test").needs(storage_boot=True),
+    porttest("com.android.trusty.rust.secretkeeper.test").needs(android=True),
 ]
