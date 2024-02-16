@@ -19,7 +19,7 @@ use super::*;
 use alloc::vec;
 use coset::CborSerializable;
 use secretkeeper_core::ta::bootloader as bl;
-use test::expect;
+use test::{expect, skip};
 use tipc::Handle;
 use trusty_std::ffi::{CString, FallibleCString};
 
@@ -41,6 +41,10 @@ fn port_connect(port_name: &str, secure: SecureConnections) {
 
 #[test]
 fn secretkeeper_connection_test() {
+    if !cfg!(secretkeeper_enabled) {
+        skip!("Secretkeeper TA not configured");
+    }
+
     port_connect(AG_PORT_NAME, SecureConnections(false));
     port_connect(SK_PORT_NAME, SecureConnections(false));
     port_connect(BL_PORT_NAME, SecureConnections(true));
@@ -48,6 +52,10 @@ fn secretkeeper_connection_test() {
 
 #[test]
 fn bootloader_retrieve_key() {
+    if !cfg!(secretkeeper_enabled) {
+        skip!("Secretkeeper TA not configured");
+    }
+
     let port = CString::try_new(BL_PORT_NAME).unwrap();
     let session = Handle::connect(port.as_c_str()).unwrap();
 
