@@ -152,7 +152,9 @@ impl tipc::Service for SecretkeeperService {
 }
 
 /// Implementation of the TIPC service for bootloader comms.
-struct BootloaderService;
+struct BootloaderService {
+    ta: Rc<RefCell<SecretkeeperTa>>,
+}
 
 impl tipc::Service for BootloaderService {
     type Connection = ();
@@ -164,7 +166,7 @@ impl tipc::Service for BootloaderService {
         _handle: &Handle,
         peer: &Uuid,
     ) -> tipc::Result<ConnectResult<Self::Connection>> {
-        info!("Accepted bootloader from uuid {peer:?}");
+        info!("Accepted bootloader connection from uuid {peer:?}");
         Ok(ConnectResult::Accept(()))
     }
 
@@ -172,12 +174,12 @@ impl tipc::Service for BootloaderService {
         &self,
         _connection: &Self::Connection,
         handle: &Handle,
-        _msg: Self::Message,
+        msg: Self::Message,
     ) -> tipc::Result<MessageResult> {
         debug!("Received a bootloader message");
 
-        // TODO: bootloader comms
-        handle.send(&SkMessage(Vec::new()))?;
+        let rsp = self.ta.borrow().process_bootloader(&msg.0);
+        handle.send(&SkMessage(rsp))?;
         Ok(MessageResult::MaintainConnection)
     }
 }
@@ -207,8 +209,11 @@ where
             error!("Could not create port config for '{port_name}': {e:?}");
             TipcError::UnknownError
         })?
-        .msg_max_size(MAX_MSG_SIZE as u32);
-    let cfg = if secure.0 { cfg.allow_ta_connect() } else { cfg.allow_ns_connect() };
+        .msg_max_size(MAX_MSG_SIZE as u32)
+        .allow_ns_connect();
+    // All ports support non-secure connections (from either Android userspace or the bootloader,
+    // both of which are outside Trusty), but may also allow secure connections.
+    let cfg = if secure.0 { cfg.allow_ta_connect() } else { cfg };
 
     dispatcher.add_service(Rc::new(service), cfg).map_err(|e| {
         error!("Could not add service for '{port_name}' to dispatcher: {e:?}");
@@ -237,9 +242,8 @@ pub fn inner_main() -> Result<(), TipcError> {
     )));
 
     let ag_service = AuthGraphService { ta: ag_ta };
-    let sk_service = SecretkeeperService { ta: sk_ta };
-    // TODO: figure out bootloader interactions
-    let bl_service = BootloaderService;
+    let sk_service = SecretkeeperService { ta: sk_ta.clone() };
+    let bl_service = BootloaderService { ta: sk_ta };
 
     // Handle multiple TIPC services, one service per port.
     let mut dispatcher = SkServiceDispatcher::<PORT_COUNT>::new().map_err(|e| {
@@ -248,9 +252,10 @@ pub fn inner_main() -> Result<(), TipcError> {
     })?;
 
     // Add the TIPC services into the dispatcher.
-    // TODO: determine if BL->SK connection counts as secure. If not, drop SecureConnections.
     add_service_port(&mut dispatcher, ag_service, AG_PORT_NAME, SecureConnections(false))?;
     add_service_port(&mut dispatcher, sk_service, SK_PORT_NAME, SecureConnections(false))?;
+    // Allow secure connections to the bootloader service for testing (as the Trusty
+    // test app uses a secure connection).
     add_service_port(&mut dispatcher, bl_service, BL_PORT_NAME, SecureConnections(true))?;
 
     let buffer = [0u8; MAX_MSG_SIZE];
