@@ -52,7 +52,11 @@ macro_rules! ss_err {
 
 /// Create a storage session.
 fn create_session() -> Result<Session, Error> {
-    Session::new(Port::TamperProof, /* wait_for_port= */ true)
+    // Use TD storage, which means that:
+    // - storage is only available after Android has booted
+    // - storage is wiped on factory reset
+    // - size of stored data isn't problematic
+    Session::new(Port::TamperDetect, /* wait_for_port= */ true)
         .map_err(|e| ss_err!(e, "Couldn't create storage session"))
 }
 
