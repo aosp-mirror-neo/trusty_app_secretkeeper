@@ -40,4 +40,10 @@ MODULE_LIBRARY_DEPS += \
 
 MODULE_RUST_TESTS := true
 
+# The port tests are built and installed regardless of whether the Secretkeeper TA
+# is enabled, so set a config value to allow tests that involve the TA to be skipped.
+ifeq (true,$(call TOBOOL,$(SECRETKEEPER_ENABLED)))
+     MODULE_RUSTFLAGS += --cfg 'secretkeeper_enabled'
+endif
+
 include make/library.mk
