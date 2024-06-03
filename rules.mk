@@ -46,4 +46,6 @@ ifeq (true,$(call TOBOOL,$(SECRETKEEPER_ENABLED)))
      MODULE_RUSTFLAGS += --cfg 'secretkeeper_enabled'
 endif
 
+MODULE_RUST_USE_CLIPPY := true
+
 include make/library.mk
