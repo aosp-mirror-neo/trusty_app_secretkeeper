@@ -79,7 +79,7 @@ impl<'s> Serialize<'s> for SkMessage {
         &'a self,
         serializer: &mut S,
     ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(&self.0.as_slice())
+        serializer.serialize_bytes(self.0.as_slice())
     }
 }
 
@@ -253,12 +253,12 @@ where
 pub fn inner_main() -> Result<(), TipcError> {
     let config = trusty_log::TrustyLoggerConfig::default()
         .with_min_level(log::Level::Info)
-        .format(&log_formatter);
+        .format(log_formatter);
     trusty_log::init_with_config(config);
     info!("Secretkeeper TA startup, on: '{AG_PORT_NAME}', '{SK_PORT_NAME}', '{BL_PORT_NAME}'");
 
     let mut crypto_impls = boring::crypto_trait_impls();
-    let storage_impl = Box::new(store::SecureStore::default());
+    let storage_impl = Box::<store::SecureStore>::default();
     let sk_ta = Rc::new(RefCell::new(
         SecretkeeperTa::new(&mut crypto_impls, storage_impl, coset::iana::EllipticCurve::Ed25519)
             .expect("Failed to create local Secretkeeper TA"),
