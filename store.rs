@@ -24,7 +24,6 @@ use alloc::string::String;
 use secretkeeper_comm::data_types::error::Error;
 use secretkeeper_core::store::KeyValueStore;
 use storage::{OpenMode, Port, Session};
-use trusty_sys;
 
 /// Store each secret in a file named "v1_<hex>", using the hex representation of the key/secret ID.
 /// Note that IDs are not confidential, so can appear in logs.
