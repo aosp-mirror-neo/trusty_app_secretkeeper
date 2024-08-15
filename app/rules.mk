@@ -33,4 +33,6 @@ MODULE_LIBRARY_DEPS += \
 	trusty/user/base/lib/trusty-log \
 	trusty/user/app/secretkeeper \
 
+MODULE_RUST_USE_CLIPPY := true
+
 include make/trusted_app.mk
