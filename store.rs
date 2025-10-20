@@ -34,7 +34,7 @@ fn filename(key: &[u8]) -> String {
     let mut result = String::with_capacity(PREFIX_V1.len() + 2 * key.len());
     result += PREFIX_V1;
     for byte in key {
-        result += &format!("{:02x}", byte);
+        result += &format!("{byte:02x}");
     }
     result
 }
